@@ -17,10 +17,10 @@ swiftemulator.io.swift.load_pipeline_outputs expects:
         histogram:
           values:        [...]          # raw galaxy counts per bin (reference only)
 
-PGalF reports M* in Msun/h and phi in (Mpc/h)^-3 dex^-1. We convert to PHYSICAL
-units (Msun, Mpc^-3 dex^-1) using h from the catalogue header, so the GSMF lines
-line up directly with observational data (Baldry+2012 / Driver+2022, physical
-Msun) at the calibration step -- no further h-juggling.
+The SWIFT/FLAMINGO catalogues are already h-free: BoxSize is in Mpc and M* in
+Msun (no little-h). We bin directly in those units, giving M* [Msun] and phi
+[Mpc^-3 dex^-1] that line up with observational data (Baldry+2012 / Driver+2022,
+physical Msun) at the calibration step -- no h-juggling.
 
 Run IDs are taken from design_parameters.json so they MATCH the emulator's
 model_parameters keys. Each run is a separate SWIFT simulation, so each has its
@@ -45,11 +45,6 @@ import numpy as np
 import yaml
 
 
-def h_of(hubble):
-    """Catalogue header stores H0 (e.g. 69.33) or h (0.6933); return h."""
-    return hubble / 100.0 if (hubble and hubble > 1.0) else hubble
-
-
 def gsmf_physical(root, snapshot, read_fof, read_gal,
                   mass_lo=7.0, mass_hi=12.0, dlog=0.25, min_count=1):
     """Return (centers_Msun, phi, scatter, counts, z) in PHYSICAL units.
@@ -64,11 +59,10 @@ def gsmf_physical(root, snapshot, read_fof, read_gal,
     header, _ = read_fof(fof_dir / f"FoF_halo_cat.{step}")
     _, subs, _ = read_gal(fof_dir / f"GALCATALOG.LIST.{step}")
 
-    h = h_of(header["hubble"])
     z = header["redshift"]
 
-    mstar = subs["mstar"][subs["mstar"] > 0] / h       # Msun/h -> Msun
-    volume = (header["box_size"] / h) ** 3             # (Mpc/h)^3 -> Mpc^3
+    mstar = subs["mstar"][subs["mstar"] > 0]           # Msun (h-free)
+    volume = header["box_size"] ** 3                   # Mpc^3 (h-free)
 
     edges = np.arange(mass_lo, mass_hi + 1e-9, dlog)
     counts, _ = np.histogram(np.log10(mstar), bins=edges)
