@@ -82,7 +82,7 @@ z=0 的 snapshot 号对所有 run 相同(由 `output_list.txt` 决定)。
 ```
 
 产出 `<out_dir>/FoF_Data/FoF.<NNNNN>/GALCATALOG.LIST.<NNNNN>`(二进制,
-每个 galaxy 含 `mstar`,SWIFT/FLAMINGO 输出已是 h-free,单位 Msun)。
+每个 galaxy 含 `mstar`,单位 Msun/h)。
 
 > pgalf 的宇宙学是**编译期硬编码**(`#define REQUIRED_OMEGA_M/…/_H0`),换宇宙学要改
 > C 源码重编译。本标定里 48 个 run 宇宙学相同,无需改动。
@@ -121,9 +121,8 @@ stellar_mass_function:
       values:        [...]          # 每个 bin 的 galaxy 原始计数 (仅参考)
 ```
 
-**单位**:SWIFT/FLAMINGO 的 catalogue 已是 **h-free**(BoxSize 为 Mpc、`mstar`
-为 Msun,不带 little-h),本脚本直接在原生单位分 bin,得到物理 Msun / Mpc⁻³,
-下一步即可直接和观测(Baldry+2012 / Driver+2022,物理 Msun)对齐,无需绕 h。
+**单位**:pgalf 全程 h-单位;本脚本统一转成**物理单位**(除掉 h,Msun / Mpc⁻³),
+以便下一步直接和观测(Baldry+2012 / Driver+2022,物理 Msun)对齐,不用再绕 h。
 
 ---
 
