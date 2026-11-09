@@ -34,6 +34,24 @@ The 6 calibrated knobs (see `design_gsmf.py`): `SNII_f_kinetic`, `SNII_delta_T_K
 `SNII_energy_fraction_min/max`, `SNII_energy_fraction_P_pivot_K_p_cm3`,
 `SPINJETAGN:subgrid_seed_mass_Msun`.
 
+**Stage 0 — environment** (once)
+
+Run the scripts from a Python env with this repo (editable) installed. The
+scripts import from source, so install the package and its dependencies:
+
+```bash
+# optional but recommended: a dedicated env instead of conda (base)
+conda create -n emulator python=3.11 -y && conda activate emulator
+
+cd /path/to/emulator_grammar
+pip install -e .                 # swiftemulator + deps (attrs, george, SALib, corner, ...)
+pip install "pyDOE==0.3.8"       # Latin hypercube; NOT plain `pip install pyDOE` (wrong 'pydoe' 1.5.0)
+pip install emcee                # only needed for the Stage-5 MCMC calibration
+```
+
+A bare `ModuleNotFoundError: No module named 'attr'` means the deps aren't
+installed yet — run `pip install -e .` above (`attr` is the import name of `attrs`).
+
 **Stage 1 — design the parameter sweep** (`design_gsmf.py`)
 
 ```bash
