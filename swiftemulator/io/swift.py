@@ -347,6 +347,19 @@ def write_parameter_files(
     if parameter_transforms is None:
         parameter_transforms = {}
 
+    # SWIFT's hand-written YAML parser only accepts inline (flow) arrays such as
+    # [1, 0, 1]; it cannot read block sequences ("- 1" on separate lines). Force
+    # every list to flow style while keeping mappings (the sections) block style.
+    class _SwiftDumper(yaml.Dumper):
+        pass
+
+    _SwiftDumper.add_representer(
+        list,
+        lambda dumper, data: dumper.represent_sequence(
+            "tag:yaml.org,2002:seq", data, flow_style=True
+        ),
+    )
+
     for identifier, filename in filenames.items():
         parameters = base_parameters.copy()
 
@@ -365,6 +378,7 @@ def write_parameter_files(
                 parameters[section][key] = transform(value)
 
         with open(filename, "w") as handle:
-            yaml.dump(parameters, handle, default_flow_style=False)
+            yaml.dump(parameters, handle, Dumper=_SwiftDumper,
+                      default_flow_style=False)
 
     return
