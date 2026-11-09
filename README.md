@@ -82,6 +82,18 @@ run's parameter file as `flamingo.yml`, and a rendered SLURM script. The
 > Point `templet.yml`'s input paths at `./<file>` and place matching (absolute)
 > symlinks in `run_template/`, so they resolve inside every run directory.
 
+Submit all runs (from the `--out` directory). The subshell `cd` matters: the
+sbatch uses relative paths (`./swift_mpi`, `flamingo.yml`, `output-%j.txt`) and
+must be submitted from inside each run dir.
+
+```bash
+cd /scratch/gsmf_runs
+for d in run_*/; do ( cd "$d" && sbatch mpirun.sbatch ); done
+```
+
+Equivalently, add `--submit` to the `setup_runs.py` call above to submit as the
+directories are created.
+
 **Stage 3 — run the galaxy finder** (pgalf, on the cluster)
 
 For each run's z=0 snapshot run pgalf to get a galaxy catalogue
