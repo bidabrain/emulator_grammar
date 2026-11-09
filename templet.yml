@@ -101,7 +101,7 @@ InitialConditions:
   cleanup_h_factors: 0
   cleanup_smoothing_lengths: 1
   cleanup_velocity_factors: 0
-  file_name: ../../ics/ics_swift25.hdf5
+  file_name: ./ics_swift25.hdf5
   generate_gas_in_ics: 1
   periodic: 1
   remap_ids: 0
