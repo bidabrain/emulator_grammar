@@ -15,6 +15,81 @@ Regression with `george` and sensitivity analysis with `SALib`.
 
 Dcumentation is available at [ReadTheDocs](https://swiftemulator.readthedocs.io/).
 
+GSMF Calibration Pipeline (this fork)
+-------------------------------------
+
+This fork adds a pipeline that calibrates the 6 SWIFT feedback parameters
+(dual-channel thermal+kinetic SN + spin-jet AGN, `ColibrePressure` f_E model)
+against the **z=0 galaxy stellar mass function (GSMF)** of a 25 Mpc box, using
+the same emulator method as COLIBRE (Chaikin et al. 2026) / FLAMINGO
+(Kugel et al. 2023). Full details in [`GSMF_CALIBRATION.md`](GSMF_CALIBRATION.md).
+
+```
+design_gsmf.py  ->  setup_runs.py  ->  SWIFT  ->  pgalf  ->  measure_gsmf.py  ->  train + calibrate
+ Latin hypercube    per-run dirs       48 sims   galaxy      catalogue -> GSMF    GP emulator ->
+ 48 x run_X.yml     + sbatch                      catalogue   emulator YAML        fit to obs GSMF
+```
+
+The 6 calibrated knobs (see `design_gsmf.py`): `SNII_f_kinetic`, `SNII_delta_T_K`,
+`SNII_energy_fraction_min/max`, `SNII_energy_fraction_P_pivot_K_p_cm3`,
+`SPINJETAGN:subgrid_seed_mass_Msun`.
+
+**Stage 1 — design the parameter sweep** (`design_gsmf.py`)
+
+```bash
+python design_gsmf.py            # base template defaults to ./templet.yml
+```
+Writes `design_gsmf/run_<id>.yml` (48 complete SWIFT parameter files),
+`design_parameters.json` (the sampled values, used later to train the emulator)
+and a corner plot. Edit `parameter_limits` / `number_of_simulations` at the top
+to change the ranges or sample count. Re-running RESAMPLES and overwrites, so
+don't re-run once you've started simulating.
+
+**Stage 2 — build ready-to-submit run directories** (`setup_runs.py`)
+
+```bash
+python setup_runs.py \
+    --design   design_gsmf \
+    --template run_template \     # a working dir of symlinks to swift_mpi, ICs,
+    --sbatch   mpirun.sbatch \    #   cooling/yield/xray tables, output_list.txt
+    --out      /scratch/gsmf_runs \
+    [--dry-run] [--submit] [--force] [--only 0,1,2]
+```
+For every run it creates `<out>/run_<id>/` containing a copy of `run_template/`
+(symlinks are kept AS symlinks, so the big ICs/tables are not duplicated), the
+run's parameter file as `flamingo.yml`, and a rendered SLURM script. The
+`--sbatch` template may use `{{RUN_ID}}`, `{{RUN_NAME}}`, `{{RUN_DIR}}`,
+`{{PARAM_FILE}}` placeholders. With `--submit` it runs `sbatch` from each dir.
+
+> Point `templet.yml`'s input paths at `./<file>` and place matching (absolute)
+> symlinks in `run_template/`, so they resolve inside every run directory.
+
+**Stage 3 — run the galaxy finder** (pgalf, on the cluster)
+
+For each run's z=0 snapshot run pgalf to get a galaxy catalogue
+(`FoF_Data/FoF.<NNNNN>/GALCATALOG.LIST.<NNNNN>`). The catalogue is in little-h
+units (Msun/h, Mpc/h).
+
+**Stage 4 — measure the GSMF** (`measure_gsmf.py`)
+
+```bash
+python measure_gsmf.py \
+    --pgalf-repo    /path/to/pgalf_swift_grammar \
+    --root-template "/path/to/pgalf/run_{id}" \
+    --snapshot      <z=0 snapshot> \
+    --design        design_gsmf/design_parameters.json \
+    --out-dir       gsmf_measured
+```
+Bins each catalogue into a GSMF (converting little-h -> physical Msun, Mpc^-3)
+and writes one `gsmf_measured/run_<id>.yml` per run in the format
+`swiftemulator.io.swift.load_pipeline_outputs` expects.
+
+**Stage 5 — train the emulator and calibrate** (to be written)
+
+Load `design_parameters.json` + `gsmf_measured/*.yml`, train a Gaussian process
+emulator, then fit to an observed z=0 GSMF (Driver+2022 / Baldry+2012) via an
+L2 penalty / MCMC. See the skeleton in [`GSMF_CALIBRATION.md`](GSMF_CALIBRATION.md).
+
 Predicting Simulations
 ----------------------
 

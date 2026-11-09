@@ -71,7 +71,7 @@ spec = ModelSpecification(
         [0.0, 1.0],      # f_kin        (current 0.3)      0=pure thermal, 1=pure kinetic
         [6.5, 8.0],      # log10 dT_SNe (current ~10^6.54; EAGLE 10^7.5)
         [0.05, 0.4],     # f_E,min      (current 0.1)      floor,   <= f_E,max
-        [0.4, 8.0],      # f_E,max      (current 0.4)      ceiling, >= f_E,min
+        [0.4, 10.0],      # f_E,max      (current 0.4)      ceiling, >= f_E,min
         [2.5, 4.5],      # log10 P_pivot(current 8e3 -> 10^3.9; COLIBRE ~10^3.4)
         [4.0, 6.0],      # log10 M_seed (current 1e5 -> 10^5)
     ],
