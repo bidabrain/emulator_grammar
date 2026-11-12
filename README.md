@@ -94,6 +94,15 @@ for d in run_*/; do ( cd "$d" && sbatch mpirun.sbatch ); done
 Equivalently, add `--submit` to the `setup_runs.py` call above to submit as the
 directories are created.
 
+Resume after a SLURM time limit. SWIFT writes restart files; add its `-r` flag
+before `flamingo.yml` and resubmit every run. This one-liner is idempotent (it
+will not add a second `-r` on later resumes):
+
+```bash
+cd /scratch/gsmf_runs
+for d in run_*/; do grep -q 'swift_mpi.*-r.*flamingo.yml' "$d/mpirun.sbatch" || sed -i 's#\(swift_mpi.*\) flamingo.yml#\1 -r flamingo.yml#' "$d/mpirun.sbatch"; ( cd "$d" && sbatch mpirun.sbatch ); done
+```
+
 **Stage 3 — run the galaxy finder** (pgalf, on the cluster)
 
 For each run's z=0 snapshot run pgalf to get a galaxy catalogue
