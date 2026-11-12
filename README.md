@@ -135,10 +135,11 @@ L2 penalty / MCMC. See the skeleton in [`GSMF_CALIBRATION.md`](GSMF_CALIBRATION.
 **Diagnostic — cosmic star-formation history** (`plot_sfh.py`)
 
 Standalone (no swift-pipeline framework) overlay of the cosmic SFR density for
-one or more runs vs the Madau & Dickinson (2014) fit. The curve is read from
-each run's `SFR.txt`; one snapshot per run is loaded only for units/box size,
-so it works mid-run as soon as any snapshot exists. Needs `swiftsimio` and
-`unyt` (`pip install swiftsimio`).
+one or more runs vs three analytic fits: Madau & Dickinson (2014), Behroozi+2013
+and Harikane+2022 (Chabrier IMF, same as the pipeline SFH plot). The curve is
+read from each run's `SFR.txt`; one snapshot per run is loaded only for
+units/box size, so it works mid-run as soon as any snapshot exists. Needs
+`swiftsimio` and `unyt` (`pip install swiftsimio`).
 
 ```bash
 python plot_sfh.py /scratch/gsmf_runs/run_0 /scratch/gsmf_runs/run_1 \

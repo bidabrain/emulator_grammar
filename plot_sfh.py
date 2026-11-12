@@ -1,9 +1,10 @@
 """Standalone cosmic star-formation-history plot for one or more SWIFT runs.
 
 Reads each run directory's SFR.txt (SWIFT's star-formation log) and overplots
-the cosmic SFR density vs redshift, compared to the Madau & Dickinson (2014)
-fit. Independent of the swift-pipeline framework; it only needs `swiftsimio`
-(to read units + box size from one snapshot per run) and `unyt`.
+the cosmic SFR density vs redshift, compared to three analytic fits (Madau &
+Dickinson 2014, Behroozi+2013, Harikane+2022; same as the swift-pipeline
+general SFH script). Independent of the swift-pipeline framework; it only needs
+`swiftsimio` (to read units + box size from one snapshot per run) and `unyt`.
 
 The SFR curve comes entirely from SFR.txt (columns a, z, SFR in internal units,
 as in the swift-pipeline script); one snapshot per run is loaded ONLY for its
@@ -34,11 +35,36 @@ SFR_OUTPUT_UNITS = unyt.msun / (unyt.year * unyt.Mpc ** 3)
 _COL_A, _COL_Z, _COL_SFR = 2, 3, 7
 
 
+# Analytic cosmic SFRD fits [Msun/yr/Mpc^3], h=0.7, matching pipeline-configs
+# general/star_formation_history.py. The SWIFT models use a Chabrier IMF, so
+# MD14 and Harikane+22 (native Salpeter) are divided by 1.7; Behroozi+13 is
+# already Chabrier. No h-rescaling (fits assume h=0.7, ~few-percent difference).
 def madau_dickinson_2014(z):
-    """Cosmic SFR density [Msun/yr/Mpc^3], Madau & Dickinson (2014) eq. 15
-    (h=0.7). Valid 0 < z < 8."""
+    """Madau & Dickinson (2014), ARA&A 52, Eq. 15 (Salpeter->Chabrier /1.7)."""
     z = np.asarray(z, dtype=float)
-    return 0.015 * (1.0 + z) ** 2.7 / (1.0 + ((1.0 + z) / 2.9) ** 5.6)
+    return (0.015 * (1.0 + z) ** 2.7 / (1.0 + ((1.0 + z) / 2.9) ** 5.6)) / 1.7
+
+
+def behroozi_2013(z):
+    """Behroozi, Wechsler & Conroy (2013), ApJ 770, 57 (native Chabrier)."""
+    z = np.asarray(z, dtype=float)
+    return 0.180 / (10.0 ** (-0.997 * (z - 1.243))
+                    + 10.0 ** (0.241 * (z - 1.243)))
+
+
+def harikane_2022(z):
+    """Harikane et al. (2022), ApJS 259, 20, Eq. 60 (Salpeter->Chabrier /1.7)."""
+    z = np.asarray(z, dtype=float)
+    return (1.0 / (61.7 * (1.0 + z) ** -3.13
+                   + 10.0 ** (0.22 * (1.0 + z))
+                   + 2.4 * 10.0 ** (0.50 * (1.0 + z) - 3.0))) / 1.7
+
+
+_SFRD_FITS = [
+    ("Madau & Dickinson (2014)", madau_dickinson_2014, "dashed"),
+    ("Behroozi et al. (2013)", behroozi_2013, "dotted"),
+    ("Harikane et al. (2022)", harikane_2022, "dashdot"),
+]
 
 
 def find_snapshot(run_dir, name=None):
@@ -106,16 +132,17 @@ def main():
         ax.plot(a, sfr, lw=1.3, zorder=100, label=label)
 
     if not args.no_obs:
-        z_obs = np.linspace(0.0, 8.0, 400)
+        z_obs = np.logspace(-3, np.log10(20.0), 300)
         a_obs = 1.0 / (1.0 + z_obs)
-        ax.plot(a_obs, madau_dickinson_2014(z_obs), color="k", ls="--",
-                lw=1.5, zorder=1, label="Madau & Dickinson (2014)")
+        for label, fit, ls in _SFRD_FITS:
+            ax.plot(a_obs, fit(z_obs), color="black", ls=ls, lw=1.1,
+                    zorder=1, label=label)
 
     # Redshift ticks on the (scale-factor) x-axis.
     z_ticks = np.array([0.0, 0.2, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0])
     ax.set_xticks(1.0 / (1.0 + z_ticks))
     ax.set_xticklabels([f"${z:g}$" for z in z_ticks])
-    ax.set_xlim(1.02, 0.09)
+    ax.set_xlim(1.02, 0.055)
     ax.set_ylim(1.8e-4, 1.7)
     ax.tick_params(axis="x", which="minor", bottom=False)
 
