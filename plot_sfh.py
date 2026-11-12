@@ -67,19 +67,30 @@ _SFRD_FITS = [
 ]
 
 
-def find_snapshot(run_dir, name=None):
-    """A snapshot .hdf5 in run_dir for metadata (any one works). Skips ICs/FoF."""
+def load_metadata_snapshot(run_dir, name=None):
+    """Load one readable snapshot in run_dir for units/box size (any one works,
+    they share the internal units and box). Tries earliest first and skips
+    truncated/corrupt files (e.g. a snapshot half-written when SLURM killed the
+    job)."""
     d = Path(run_dir)
     if name:
-        p = d / name
-        if not p.exists():
-            raise SystemExit(f"snapshot {p} not found")
-        return p
-    snaps = [c for c in sorted(d.glob("*.hdf5"))
-             if "ics" not in c.name.lower() and "fof" not in c.name.lower()]
-    if not snaps:
-        raise SystemExit(f"no snapshot .hdf5 found in {d} (needed for units/box)")
-    return snaps[-1]
+        cands = [d / name]
+        if not cands[0].exists():
+            raise SystemExit(f"snapshot {cands[0]} not found")
+    else:
+        cands = [c for c in sorted(d.glob("*.hdf5"))
+                 if "ics" not in c.name.lower() and "fof" not in c.name.lower()]
+        if not cands:
+            raise SystemExit(f"no snapshot .hdf5 found in {d} (needed for units/box)")
+
+    last_err = None
+    for p in cands:                                   # earliest first = most likely complete
+        try:
+            return load(str(p))
+        except Exception as e:
+            last_err = e
+            print(f"  skip unreadable snapshot {p.name}: {type(e).__name__}")
+    raise SystemExit(f"no readable snapshot in {d} (last error: {last_err})")
 
 
 def run_sfh(run_dir, snapshot_name=None):
@@ -97,7 +108,7 @@ def run_sfh(run_dir, snapshot_name=None):
     z = data[_COL_Z]
     sfr_internal = data[_COL_SFR]
 
-    snap = load(str(find_snapshot(d, snapshot_name)))
+    snap = load_metadata_snapshot(d, snapshot_name)
     box = snap.metadata.boxsize
     volume = box[0] * box[1] * box[2]
     sfr_units = snap.gas.star_formation_rates.units
