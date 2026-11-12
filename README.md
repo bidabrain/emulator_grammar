@@ -132,6 +132,25 @@ Load `design_parameters.json` + `gsmf_measured/*.yml`, train a Gaussian process
 emulator, then fit to an observed z=0 GSMF (Driver+2022 / Baldry+2012) via an
 L2 penalty / MCMC. See the skeleton in [`GSMF_CALIBRATION.md`](GSMF_CALIBRATION.md).
 
+**Diagnostic — cosmic star-formation history** (`plot_sfh.py`)
+
+Standalone (no swift-pipeline framework) overlay of the cosmic SFR density for
+one or more runs vs the Madau & Dickinson (2014) fit. The curve is read from
+each run's `SFR.txt`; one snapshot per run is loaded only for units/box size,
+so it works mid-run as soon as any snapshot exists. Needs `swiftsimio` and
+`unyt` (`pip install swiftsimio`).
+
+```bash
+python plot_sfh.py /scratch/gsmf_runs/run_0 /scratch/gsmf_runs/run_1 \
+    --labels run0 run1 --output sfh.png
+
+# all design runs on one figure:
+python plot_sfh.py /scratch/gsmf_runs/run_* --output sfh_all.png
+```
+
+Options: `--labels` (legend names), `--snapshot-name` (default: auto-detect a
+snapshot in each dir), `--no-obs` (drop the MD14 fit).
+
 Predicting Simulations
 ----------------------
 
