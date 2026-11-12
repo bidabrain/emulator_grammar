@@ -112,7 +112,10 @@ python measure_gsmf.py \
 ```
 Bins each catalogue into a GSMF (converting little-h -> physical Msun, Mpc^-3)
 and writes one `gsmf_measured/run_<id>.yml` per run in the format
-`swiftemulator.io.swift.load_pipeline_outputs` expects.
+`swiftemulator.io.swift.load_pipeline_outputs` expects. By default M* is the
+stellar mass within a **3D 50 proper-kpc aperture** (COLIBRE / observational
+convention, read from `GALFIND.DATA`); set `--aperture-kpc` to change the size,
+or `--aperture-kpc 0` for the catalogue's total bound stellar mass.
 
 **Stage 5 — train the emulator and calibrate** (to be written)
 

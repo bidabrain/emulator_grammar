@@ -22,6 +22,11 @@ units (Msun, Mpc^-3 dex^-1) using h from the catalogue header, so the GSMF lines
 line up directly with observational data (Baldry+2012 / Driver+2022, physical
 Msun) at the calibration step -- no further h-juggling.
 
+By default M* is the stellar mass within a 3D 50 proper-kpc aperture (COLIBRE /
+observational convention; Chaikin+2026), computed from the per-particle
+GALFIND.DATA. Use --aperture-kpc to change the size, or --aperture-kpc 0 to fall
+back to the catalogue's total bound stellar mass (no aperture).
+
 Run IDs are taken from design_parameters.json so they MATCH the emulator's
 model_parameters keys. Each run is a separate SWIFT simulation, so each has its
 own PGalF output directory; give the directory as a template with "{id}".
@@ -51,13 +56,19 @@ def h_of(hubble):
 
 
 def gsmf_physical(root, snapshot, read_fof, read_gal,
-                  mass_lo=7.0, mass_hi=12.0, dlog=0.25, min_count=1):
+                  mass_lo=7.0, mass_hi=12.0, dlog=0.25, min_count=1,
+                  aperture_kpc=None, aperture_fn=None):
     """Return (centers_Msun, phi, scatter, counts, z) in PHYSICAL units.
 
     centers_Msun : linear M* bin centres [Msun]
     phi          : linear number density [Mpc^-3 dex^-1]
     scatter      : linear Poisson error on phi [Mpc^-3 dex^-1]
     counts       : raw galaxy count per kept bin
+
+    aperture_kpc : if >0, use the stellar mass within this 3D aperture (PROPER
+                   kpc, COLIBRE/obs convention) read from GALFIND.DATA instead of
+                   the catalogue's total bound M*. aperture_fn must then be
+                   read_pgalf_catalog.aperture_stellar_mass.
     """
     step = f"{snapshot:05d}"
     fof_dir = Path(root) / "FoF_Data" / f"FoF.{step}"
@@ -67,7 +78,21 @@ def gsmf_physical(root, snapshot, read_fof, read_gal,
     h = h_of(header["hubble"])
     z = header["redshift"]
 
-    mstar = subs["mstar"][subs["mstar"] > 0] / h       # Msun/h -> Msun
+    if aperture_kpc is None or aperture_kpc <= 0:
+        mstar_code = subs["mstar"]                     # Msun/h, total bound
+    else:
+        # proper kpc -> comoving Mpc/h (the catalogue's length units).
+        radius = (aperture_kpc / 1000.0) / header["anow"] * h
+        data_file = fof_dir / f"GALFIND.DATA.{step}"
+        if not data_file.exists():
+            raise SystemExit(f"--aperture-kpc set but {data_file} is missing")
+        mstar_code = aperture_fn(data_file, radius, header["box_size"])
+        if len(mstar_code) != len(subs):
+            raise SystemExit(
+                f"GALFIND.DATA subhalos ({len(mstar_code)}) != "
+                f"GALCATALOG ({len(subs)}) in {fof_dir}")
+
+    mstar = mstar_code[mstar_code > 0] / h             # Msun/h -> Msun
     volume = (header["box_size"] / h) ** 3             # (Mpc/h)^3 -> Mpc^3
 
     edges = np.arange(mass_lo, mass_hi + 1e-9, dlog)
@@ -129,12 +154,16 @@ def main():
     p.add_argument("--dlog", type=float, default=0.25, help="mass bin width [dex]")
     p.add_argument("--min-count", type=int, default=1,
                    help="drop bins with fewer than this many galaxies")
+    p.add_argument("--aperture-kpc", type=float, default=50.0,
+                   help="3D stellar aperture in PROPER kpc (COLIBRE/obs use 50, "
+                        "read from GALFIND.DATA); pass <=0 for total bound M*")
     args = p.parse_args()
 
     # Import PGalF's binary readers from its repo.
     sys.path.insert(0, str(args.pgalf_repo))
     try:
-        from read_pgalf_catalog import read_fof_catalog, read_galaxy_catalog
+        from read_pgalf_catalog import (read_fof_catalog, read_galaxy_catalog,
+                                         aperture_stellar_mass)
     except ImportError as e:
         raise SystemExit(f"Could not import read_pgalf_catalog from {args.pgalf_repo}: {e}")
 
@@ -156,13 +185,17 @@ def main():
             root, args.snapshot, read_fof_catalog, read_galaxy_catalog,
             mass_lo=args.mass_lo, mass_hi=args.mass_hi,
             dlog=args.dlog, min_count=args.min_count,
+            aperture_kpc=args.aperture_kpc, aperture_fn=aperture_stellar_mass,
         )
         out = args.out_dir / f"run_{rid}.yml"
         write_emulator_yaml(out, centers, phi, scatter, counts,
                             scaling_name=args.scaling_name)
         done.append((rid, z, int(counts.sum()), len(centers)))
 
-    print(f"Wrote {len(done)} GSMF files to {args.out_dir}/  (scaling='{args.scaling_name}')")
+    ap = (f"{args.aperture_kpc:g} pkpc 3D aperture"
+          if args.aperture_kpc and args.aperture_kpc > 0 else "total bound M*")
+    print(f"Wrote {len(done)} GSMF files to {args.out_dir}/  "
+          f"(scaling='{args.scaling_name}', M*={ap})")
     for rid, z, ntot, nbin in done:
         print(f"  run {rid:>3}: z={z:.3f}  {ntot:>7d} galaxies  {nbin} bins")
     if missing:
