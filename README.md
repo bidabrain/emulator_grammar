@@ -124,7 +124,15 @@ and writes one `gsmf_measured/run_<id>.yml` per run in the format
 `swiftemulator.io.swift.load_pipeline_outputs` expects. By default M* is the
 stellar mass within a **3D 50 proper-kpc aperture** (COLIBRE / observational
 convention, read from `GALFIND.DATA`); set `--aperture-kpc` to change the size,
-or `--aperture-kpc 0` for the catalogue's total bound stellar mass.
+or `--aperture-kpc 0` for the catalogue's total bound stellar mass. Several
+values (e.g. `--aperture-kpc 0 30 50 100`) write one set of YAMLs per aperture
+into `<out_dir>/ap_<X>kpc/` (`ap_total/` for 0), reading `GALFIND.DATA` once
+per run; train on one of those directories.
+
+The `GALFIND.DATA` reader comes from `--pgalf-repo`, which must be at least
+`3d0b545` (auto-detects record sizes; older readers hard-code them and fail with
+`Truncated subhalo header` on `NCHEM`/`NDUST` builds) and `ba53e2d` for several
+apertures; the script checks this and asks you to `git pull` otherwise.
 
 **Stage 5 — train the emulator and calibrate** (to be written)
 

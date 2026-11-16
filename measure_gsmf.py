@@ -25,7 +25,9 @@ Msun) at the calibration step -- no further h-juggling.
 By default M* is the stellar mass within a 3D 50 proper-kpc aperture (COLIBRE /
 observational convention; Chaikin+2026), computed from the per-particle
 GALFIND.DATA. Use --aperture-kpc to change the size, or --aperture-kpc 0 to fall
-back to the catalogue's total bound stellar mass (no aperture).
+back to the catalogue's total bound stellar mass (no aperture). Several values
+(e.g. --aperture-kpc 0 30 50 100) write one set of YAMLs per aperture into
+OUT_DIR/ap_<X>kpc/ (ap_total/ for 0), reading GALFIND.DATA once per run.
 
 Run IDs are taken from design_parameters.json so they MATCH the emulator's
 model_parameters keys. Each run is a separate SWIFT simulation, so each has its
@@ -43,6 +45,7 @@ Then train the emulator on {design_parameters.json, gsmf_measured/run_*.yml}.
 
 import sys
 import json
+import inspect
 import argparse
 from pathlib import Path
 
@@ -53,6 +56,54 @@ import yaml
 def h_of(hubble):
     """Catalogue header stores H0 (e.g. 69.33) or h (0.6933); return h."""
     return hubble / 100.0 if (hubble and hubble > 1.0) else hubble
+
+
+def _is_aperture(a):
+    return a is not None and a > 0
+
+
+def _aperture_tag(a):
+    """Sub-directory name for one aperture in multi-aperture mode."""
+    return f"ap_{a:g}kpc" if _is_aperture(a) else "ap_total"
+
+
+def stellar_masses_code(root, snapshot, read_fof, read_gal, apertures_kpc,
+                        aperture_fn=None):
+    """Per-subhalo M* [Msun/h] for each entry of apertures_kpc, plus the FoF
+    header. An entry >0 is a 3D PROPER-kpc aperture (COLIBRE/obs convention)
+    read from GALFIND.DATA; <=0 or None is the catalogue's total bound M*.
+    GALFIND.DATA is read once for all apertures (aperture_fn must be
+    read_pgalf_catalog.aperture_stellar_mass, which accepts a list of radii)."""
+    step = f"{snapshot:05d}"
+    fof_dir = Path(root) / "FoF_Data" / f"FoF.{step}"
+    header, _ = read_fof(fof_dir / f"FoF_halo_cat.{step}")
+    _, subs, _ = read_gal(fof_dir / f"GALCATALOG.LIST.{step}")
+
+    ap_kpc = [a for a in apertures_kpc if _is_aperture(a)]
+    by_ap = {}
+    if ap_kpc:
+        h = h_of(header["hubble"])
+        # proper kpc -> comoving Mpc/h (the catalogue's length units).
+        radii = [(a / 1000.0) / header["anow"] * h for a in ap_kpc]
+        data_file = fof_dir / f"GALFIND.DATA.{step}"
+        if not data_file.exists():
+            raise SystemExit(f"--aperture-kpc set but {data_file} is missing")
+        if len(radii) == 1:
+            mstar_ap = aperture_fn(data_file, radii[0], header["box_size"])[:, None]
+        else:
+            try:
+                mstar_ap = aperture_fn(data_file, radii, header["box_size"])
+            except TypeError:
+                raise SystemExit("read_pgalf_catalog.aperture_stellar_mass takes "
+                                 "a single radius only; git pull pgalf_swift_grammar "
+                                 "(needs >= ba53e2d) for several --aperture-kpc")
+        if len(mstar_ap) != len(subs):
+            raise SystemExit(
+                f"GALFIND.DATA subhalos ({len(mstar_ap)}) != "
+                f"GALCATALOG ({len(subs)}) in {fof_dir}")
+        by_ap = {a: mstar_ap[:, j] for j, a in enumerate(ap_kpc)}
+    masses = [by_ap[a] if _is_aperture(a) else subs["mstar"] for a in apertures_kpc]
+    return masses, header
 
 
 def gsmf_physical(root, snapshot, read_fof, read_gal,
@@ -70,28 +121,17 @@ def gsmf_physical(root, snapshot, read_fof, read_gal,
                    the catalogue's total bound M*. aperture_fn must then be
                    read_pgalf_catalog.aperture_stellar_mass.
     """
-    step = f"{snapshot:05d}"
-    fof_dir = Path(root) / "FoF_Data" / f"FoF.{step}"
-    header, _ = read_fof(fof_dir / f"FoF_halo_cat.{step}")
-    _, subs, _ = read_gal(fof_dir / f"GALCATALOG.LIST.{step}")
+    (mstar_code,), header = stellar_masses_code(
+        root, snapshot, read_fof, read_gal, [aperture_kpc], aperture_fn)
+    return gsmf_from_masses(mstar_code, header, mass_lo, mass_hi, dlog, min_count)
 
+
+def gsmf_from_masses(mstar_code, header, mass_lo=7.0, mass_hi=12.0, dlog=0.25,
+                     min_count=1):
+    """Bin catalogue M* [Msun/h] into a PHYSICAL-unit GSMF; same return as
+    gsmf_physical."""
     h = h_of(header["hubble"])
     z = header["redshift"]
-
-    if aperture_kpc is None or aperture_kpc <= 0:
-        mstar_code = subs["mstar"]                     # Msun/h, total bound
-    else:
-        # proper kpc -> comoving Mpc/h (the catalogue's length units).
-        radius = (aperture_kpc / 1000.0) / header["anow"] * h
-        data_file = fof_dir / f"GALFIND.DATA.{step}"
-        if not data_file.exists():
-            raise SystemExit(f"--aperture-kpc set but {data_file} is missing")
-        mstar_code = aperture_fn(data_file, radius, header["box_size"])
-        if len(mstar_code) != len(subs):
-            raise SystemExit(
-                f"GALFIND.DATA subhalos ({len(mstar_code)}) != "
-                f"GALCATALOG ({len(subs)}) in {fof_dir}")
-
     mstar = mstar_code[mstar_code > 0] / h             # Msun/h -> Msun
     volume = (header["box_size"] / h) ** 3             # (Mpc/h)^3 -> Mpc^3
 
@@ -154,9 +194,12 @@ def main():
     p.add_argument("--dlog", type=float, default=0.25, help="mass bin width [dex]")
     p.add_argument("--min-count", type=int, default=1,
                    help="drop bins with fewer than this many galaxies")
-    p.add_argument("--aperture-kpc", type=float, default=50.0,
-                   help="3D stellar aperture in PROPER kpc (COLIBRE/obs use 50, "
-                        "read from GALFIND.DATA); pass <=0 for total bound M*")
+    p.add_argument("--aperture-kpc", type=float, nargs="+", default=[50.0],
+                   help="3D stellar aperture(s) in PROPER kpc (COLIBRE/obs use 50, "
+                        "read from GALFIND.DATA); <=0 means total bound M*. "
+                        "Several values (e.g. 0 30 50 100) write one set of YAMLs "
+                        "per aperture into OUT_DIR/ap_<X>kpc/ (or ap_total/), "
+                        "reading GALFIND.DATA once per run")
     args = p.parse_args()
 
     # Import PGalF's binary readers from its repo.
@@ -166,13 +209,25 @@ def main():
                                          aperture_stellar_mass)
     except ImportError as e:
         raise SystemExit(f"Could not import read_pgalf_catalog from {args.pgalf_repo}: {e}")
+    # Old readers hard-code the GALFIND.DATA record sizes (wrong for NCHEM/NDUST
+    # builds -> "Truncated subhalo header"). Several apertures need >= ba53e2d.
+    if any(_is_aperture(a) for a in args.aperture_kpc) and \
+            "sizes" not in inspect.signature(aperture_stellar_mass).parameters:
+        raise SystemExit(f"read_pgalf_catalog in {args.pgalf_repo} is too old "
+                         "(hard-coded GALFIND.DATA record sizes); git pull it "
+                         "(needs >= 3d0b545, or >= ba53e2d for several apertures)")
 
     with open(args.design) as fh:
         run_ids = list(json.load(fh).keys())
 
-    args.out_dir.mkdir(parents=True, exist_ok=True)
+    apertures = args.aperture_kpc
+    multi = len(apertures) > 1
+    out_dirs = [args.out_dir / _aperture_tag(a) if multi else args.out_dir
+                for a in apertures]
+    for d in out_dirs:
+        d.mkdir(parents=True, exist_ok=True)
 
-    done, missing = [], []
+    done, missing = {a: [] for a in apertures}, []
     for rid in run_ids:
         root = args.root_template.format(id=rid)
         step = f"{args.snapshot:05d}"
@@ -181,28 +236,28 @@ def main():
             missing.append((rid, str(cat)))
             continue
 
-        centers, phi, scatter, counts, z = gsmf_physical(
+        masses, header = stellar_masses_code(
             root, args.snapshot, read_fof_catalog, read_galaxy_catalog,
-            mass_lo=args.mass_lo, mass_hi=args.mass_hi,
-            dlog=args.dlog, min_count=args.min_count,
-            aperture_kpc=args.aperture_kpc, aperture_fn=aperture_stellar_mass,
-        )
-        out = args.out_dir / f"run_{rid}.yml"
-        write_emulator_yaml(out, centers, phi, scatter, counts,
-                            scaling_name=args.scaling_name)
-        done.append((rid, z, int(counts.sum()), len(centers)))
+            apertures, aperture_fn=aperture_stellar_mass)
+        for a, mstar_code, d in zip(apertures, masses, out_dirs):
+            centers, phi, scatter, counts, z = gsmf_from_masses(
+                mstar_code, header, mass_lo=args.mass_lo, mass_hi=args.mass_hi,
+                dlog=args.dlog, min_count=args.min_count)
+            write_emulator_yaml(d / f"run_{rid}.yml", centers, phi, scatter, counts,
+                                scaling_name=args.scaling_name)
+            done[a].append((rid, z, int(counts.sum()), len(centers)))
 
-    ap = (f"{args.aperture_kpc:g} pkpc 3D aperture"
-          if args.aperture_kpc and args.aperture_kpc > 0 else "total bound M*")
-    print(f"Wrote {len(done)} GSMF files to {args.out_dir}/  "
-          f"(scaling='{args.scaling_name}', M*={ap})")
-    for rid, z, ntot, nbin in done:
-        print(f"  run {rid:>3}: z={z:.3f}  {ntot:>7d} galaxies  {nbin} bins")
+    for a, d in zip(apertures, out_dirs):
+        ap = f"{a:g} pkpc 3D aperture" if _is_aperture(a) else "total bound M*"
+        print(f"Wrote {len(done[a])} GSMF files to {d}/  "
+              f"(scaling='{args.scaling_name}', M*={ap})")
+        for rid, z, ntot, nbin in done[a]:
+            print(f"  run {rid:>3}: z={z:.3f}  {ntot:>7d} galaxies  {nbin} bins")
     if missing:
         print(f"\nMISSING catalogues for {len(missing)} runs (not yet processed by PGalF):")
         for rid, path in missing:
             print(f"  run {rid:>3}: {path}")
-    if done:
+    if any(done.values()):
         # NOTE: use the written 'scatter' field + sanitize_output=True. Do NOT pass
         # histogram_for_error together with log_dependent -- swiftemulator leaves the
         # values linear in that path (swift.py:155 is skipped), giving log errors on
@@ -210,7 +265,7 @@ def main():
         print("\nNext: train the emulator, e.g.")
         print("  from swiftemulator.io.swift import load_pipeline_outputs")
         print(f"  values, units = load_pipeline_outputs(")
-        print(f"      filenames={{rid: '{args.out_dir}/run_'+str(rid)+'.yml' for rid in ...}},")
+        print(f"      filenames={{rid: '{out_dirs[0]}/run_'+str(rid)+'.yml' for rid in ...}},")
         print(f"      scaling_relations=['{args.scaling_name}'],")
         print(f"      log_independent=['{args.scaling_name}'], log_dependent=['{args.scaling_name}'],")
         print(f"      sanitize_output=True)")

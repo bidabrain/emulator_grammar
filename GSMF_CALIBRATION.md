@@ -106,6 +106,13 @@ python3 measure_gsmf.py \
 - `--root-template` 里的 `{id}` 会被替换成 run id("0"…"47"),按你的实际目录布局填。
 - run id 从 `design_parameters.json` 读,**和 emulator 的参数 key 一一对应**。
 - 还没被 pgalf 处理的 run 会列为 MISSING 并跳过,可增量重跑。
+- `--aperture-kpc`(默认 `50`):M* 取 3D 50 proper-kpc 孔径内的恒星质量(COLIBRE/观测约定,
+  从 `GALFIND.DATA` 读);`0` = catalogue 的 total bound M*。可一次给多个值
+  (如 `--aperture-kpc 0 30 50 100`),每个 run 的 `GALFIND.DATA` 只读一遍,结果分别写到
+  `gsmf_measured/ap_<X>kpc/`(0 → `ap_total/`);训练时选其中一个目录。
+- `--pgalf-repo` 需 ≥ `3d0b545`(自动识别 `GALFIND.DATA` 记录长度;旧版写死长度,
+  NCHEM/NDUST 编译下会报 `Truncated subhalo header`),多孔径需 ≥ `ba53e2d`;
+  版本不够时脚本会直接报错提示 `git pull`。
 - 产出 `gsmf_measured/run_X.yml`,结构:
 
 ```yaml
