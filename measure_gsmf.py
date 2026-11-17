@@ -68,12 +68,15 @@ def _aperture_tag(a):
 
 
 def stellar_masses_code(root, snapshot, read_fof, read_gal, apertures_kpc,
-                        aperture_fn=None):
+                        aperture_fn=None, centers_fn=None):
     """Per-subhalo M* [Msun/h] for each entry of apertures_kpc, plus the FoF
     header. An entry >0 is a 3D PROPER-kpc aperture (COLIBRE/obs convention)
     read from GALFIND.DATA; <=0 or None is the catalogue's total bound M*.
     GALFIND.DATA is read once for all apertures (aperture_fn must be
-    read_pgalf_catalog.aperture_stellar_mass, which accepts a list of radii)."""
+    read_pgalf_catalog.aperture_stellar_mass, which accepts a list of radii).
+    Apertures are centred on each subhalo's centre of mass unless centers_fn
+    (read_pgalf_catalog.galcenter_positions) is given, in which case the
+    GalCenter stellar centres from GALFIND.CENTER are used (COM where missing)."""
     step = f"{snapshot:05d}"
     fof_dir = Path(root) / "FoF_Data" / f"FoF.{step}"
     header, _ = read_fof(fof_dir / f"FoF_halo_cat.{step}")
@@ -88,11 +91,20 @@ def stellar_masses_code(root, snapshot, read_fof, read_gal, apertures_kpc,
         data_file = fof_dir / f"GALFIND.DATA.{step}"
         if not data_file.exists():
             raise SystemExit(f"--aperture-kpc set but {data_file} is missing")
+        kw = {}
+        if centers_fn is not None:
+            center_file = fof_dir / f"GALFIND.CENTER.{step}"
+            if not center_file.exists():
+                raise SystemExit(f"--center galcenter but {center_file} is missing")
+            kw["centers"] = centers_fn(center_file, fof_dir / f"GALCATALOG.LIST.{step}")
+            if len(kw["centers"]) != len(subs):
+                raise SystemExit(f"GALFIND.CENTER aligned to {len(kw['centers'])} "
+                                 f"subhalos != GALCATALOG ({len(subs)}) in {fof_dir}")
         if len(radii) == 1:
-            mstar_ap = aperture_fn(data_file, radii[0], header["box_size"])[:, None]
+            mstar_ap = aperture_fn(data_file, radii[0], header["box_size"], **kw)[:, None]
         else:
             try:
-                mstar_ap = aperture_fn(data_file, radii, header["box_size"])
+                mstar_ap = aperture_fn(data_file, radii, header["box_size"], **kw)
             except TypeError:
                 raise SystemExit("read_pgalf_catalog.aperture_stellar_mass takes "
                                  "a single radius only; git pull pgalf_swift_grammar "
@@ -200,6 +212,10 @@ def main():
                         "Several values (e.g. 0 30 50 100) write one set of YAMLs "
                         "per aperture into OUT_DIR/ap_<X>kpc/ (or ap_total/), "
                         "reading GALFIND.DATA once per run")
+    p.add_argument("--center", choices=("com", "galcenter"), default="com",
+                   help="aperture centre: 'com' = subhalo centre of mass of all "
+                        "particle types; 'galcenter' = GalCenter stellar centre "
+                        "(GALFIND.CENTER), falling back to the COM where missing")
     args = p.parse_args()
 
     # Import PGalF's binary readers from its repo.
@@ -216,6 +232,13 @@ def main():
         raise SystemExit(f"read_pgalf_catalog in {args.pgalf_repo} is too old "
                          "(hard-coded GALFIND.DATA record sizes); git pull it "
                          "(needs >= 3d0b545, or >= ba53e2d for several apertures)")
+    centers_fn = None
+    if args.center == "galcenter":
+        try:
+            from read_pgalf_catalog import galcenter_positions as centers_fn
+        except ImportError:
+            raise SystemExit(f"read_pgalf_catalog in {args.pgalf_repo} has no "
+                             "galcenter_positions; git pull it for --center galcenter")
 
     with open(args.design) as fh:
         run_ids = list(json.load(fh).keys())
@@ -238,7 +261,7 @@ def main():
 
         masses, header = stellar_masses_code(
             root, args.snapshot, read_fof_catalog, read_galaxy_catalog,
-            apertures, aperture_fn=aperture_stellar_mass)
+            apertures, aperture_fn=aperture_stellar_mass, centers_fn=centers_fn)
         for a, mstar_code, d in zip(apertures, masses, out_dirs):
             centers, phi, scatter, counts, z = gsmf_from_masses(
                 mstar_code, header, mass_lo=args.mass_lo, mass_hi=args.mass_hi,
@@ -248,7 +271,8 @@ def main():
             done[a].append((rid, z, int(counts.sum()), len(centers)))
 
     for a, d in zip(apertures, out_dirs):
-        ap = f"{a:g} pkpc 3D aperture" if _is_aperture(a) else "total bound M*"
+        ap = (f"{a:g} pkpc 3D aperture, centre={args.center}" if _is_aperture(a)
+              else "total bound M*")
         print(f"Wrote {len(done[a])} GSMF files to {d}/  "
               f"(scaling='{args.scaling_name}', M*={ap})")
         for rid, z, ntot, nbin in done[a]:

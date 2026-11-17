@@ -134,6 +134,12 @@ The `GALFIND.DATA` reader comes from `--pgalf-repo`, which must be at least
 `Truncated subhalo header` on `NCHEM`/`NDUST` builds) and `ba53e2d` for several
 apertures; the script checks this and asks you to `git pull` otherwise.
 
+`--center com|galcenter` (default `com`) picks the aperture centre: the subhalo
+centre of mass of all particle types, or the GalCenter stellar centre from
+`GALFIND.CENTER` (needs the PGalF galcenter stage; subhalos without a centre
+fall back to the COM). `galcenter` is closer to the observational convention
+and avoids apertures that miss an offset stellar body.
+
 **Stage 5 — train the emulator and calibrate** (to be written)
 
 Load `design_parameters.json` + `gsmf_measured/*.yml`, train a Gaussian process

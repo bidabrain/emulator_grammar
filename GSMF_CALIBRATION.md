@@ -113,6 +113,10 @@ python3 measure_gsmf.py \
 - `--pgalf-repo` 需 ≥ `3d0b545`(自动识别 `GALFIND.DATA` 记录长度;旧版写死长度,
   NCHEM/NDUST 编译下会报 `Truncated subhalo header`),多孔径需 ≥ `ba53e2d`;
   版本不够时脚本会直接报错提示 `git pull`。
+- `--center com|galcenter`(默认 `com`):孔径中心。`com` = subhalo 所有粒子的质心;
+  `galcenter` = GalCenter 输出的恒星中心(`GALFIND.CENTER`,需跑过 galcenter 阶段),
+  缺失的 subhalo 回退到质心。`galcenter` 更接近观测做法,能避免质心偏离恒星主体时
+  孔径漏掉恒星。
 - 产出 `gsmf_measured/run_X.yml`,结构:
 
 ```yaml
