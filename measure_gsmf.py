@@ -42,6 +42,10 @@ own PGalF output directory; give the directory as a template with "{id}".
         --out-dir      gsmf_measured
 
 Then train the emulator on {design_parameters.json, gsmf_measured/run_*.yml}.
+
+With --finder hbt the catalogues come from HBT-HERONS instead (run with
+HBT-HERONS-GRAMMAR/grammar/run_hbt.sh; --hbt-repo points at that repo and
+--root-template at the per-run HBT output dirs). Same output format.
 """
 
 import sys
@@ -233,13 +237,32 @@ def write_emulator_yaml(path, centers, phi, scatter, counts,
         yaml.safe_dump(doc, fh, default_flow_style=False, sort_keys=False)
 
 
+def write_run(args, rid, masses, header, apertures, out_dirs, done):
+    """Bin one run's catalogue M* [Msun/h] per aperture and write its YAMLs."""
+    for a, mstar_code, d in zip(apertures, masses, out_dirs):
+        centers, phi, scatter, counts, z = gsmf_from_masses(
+            mstar_code, header, mass_lo=args.mass_lo, mass_hi=args.mass_hi,
+            dlog=args.dlog, min_count=args.min_count)
+        write_emulator_yaml(d / f"run_{rid}.yml", centers, phi, scatter, counts,
+                            scaling_name=args.scaling_name)
+        done[a].append((rid, z, int(counts.sum()), len(centers)))
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--pgalf-repo", type=Path, required=True,
-                   help="Path to pgalf_swift_grammar (for read_pgalf_catalog.py)")
+    p.add_argument("--finder", choices=("pgalf", "hbt"), default="pgalf",
+                   help="galaxy finder whose catalogues to read: PGalF (default) or "
+                        "HBT-HERONS (HBT-HERONS-GRAMMAR/grammar/run_hbt.sh outputs)")
+    p.add_argument("--pgalf-repo", type=Path, default=None,
+                   help="Path to pgalf_swift_grammar (for read_pgalf_catalog.py); "
+                        "required for --finder pgalf")
+    p.add_argument("--hbt-repo", type=Path, default=None,
+                   help="Path to HBT-HERONS-GRAMMAR (for grammar/read_hbt_catalog.py); "
+                        "required for --finder hbt")
     p.add_argument("--root-template", type=str, required=True,
-                   help="Per-run PGalF output dir, with '{id}', e.g. '/data/pgalf/run_{id}'")
+                   help="Per-run finder output dir, with '{id}', e.g. '/data/pgalf/run_{id}' "
+                        "(PGalF run_pgalf.sh -o) or '/data/hbt/run_{id}' (run_hbt.sh -o)")
     p.add_argument("--snapshot", type=int, required=True,
                    help="z=0 snapshot number (same for every run)")
     p.add_argument("--design", type=Path, default=Path("design_gsmf/design_parameters.json"),
@@ -257,15 +280,36 @@ def main():
                         "Several values (e.g. 0 30 50 100) write one set of YAMLs "
                         "per aperture into OUT_DIR/ap_<X>kpc/ (or ap_total/), "
                         "reading GALFIND.DATA once per run")
-    p.add_argument("--center", choices=("com", "galcenter"), default="com",
-                   help="aperture centre: 'com' = subhalo centre of mass of all "
-                        "particle types; 'galcenter' = GalCenter stellar centre "
-                        "(GALFIND.CENTER), falling back to the COM where missing")
+    p.add_argument("--center", choices=("com", "galcenter", "mostbound"), default=None,
+                   help="aperture centre. PGalF: 'com' (default) = subhalo centre of "
+                        "mass of all particle types, 'galcenter' = GalCenter stellar "
+                        "centre (GALFIND.CENTER), COM where missing. HBT: 'mostbound' "
+                        "(default) = most bound particle, 'com' = centre of mass of the "
+                        "bound particles")
     p.add_argument("--skip-h-check", action="store_true",
                    help="do not compare the FoF box_size with <root>/snap_XXXX.hdf5 "
                         "(the check catches catalogues made by the old NewDD, which "
                         "used h=1 on SWIFT input)")
     args = p.parse_args()
+
+    if args.center is None:
+        args.center = "com" if args.finder == "pgalf" else "mostbound"
+    if args.finder == "hbt":
+        if args.center == "galcenter":
+            p.error("--center galcenter is PGalF-only; use mostbound or com with --finder hbt")
+        if args.hbt_repo is None:
+            p.error("--finder hbt needs --hbt-repo")
+        sys.path.insert(0, str(args.hbt_repo / "grammar"))
+        try:
+            from read_hbt_catalog import load_stellar_masses as hbt_masses, find_output
+        except ImportError as e:
+            raise SystemExit(f"Could not import grammar/read_hbt_catalog from {args.hbt_repo}: {e}")
+        measure_runs(args, hbt_masses=hbt_masses, hbt_find=find_output)
+        return
+    if args.center == "mostbound":
+        p.error("--center mostbound is HBT-only; use com or galcenter with --finder pgalf")
+    if args.pgalf_repo is None:
+        p.error("--finder pgalf needs --pgalf-repo")
 
     # Import PGalF's binary readers from its repo.
     sys.path.insert(0, str(args.pgalf_repo))
@@ -288,7 +332,16 @@ def main():
         except ImportError:
             raise SystemExit(f"read_pgalf_catalog in {args.pgalf_repo} has no "
                              "galcenter_positions; git pull it for --center galcenter")
+    measure_runs(args, read_fof_catalog=read_fof_catalog,
+                 read_galaxy_catalog=read_galaxy_catalog,
+                 aperture_stellar_mass=aperture_stellar_mass, centers_fn=centers_fn)
 
+
+def measure_runs(args, read_fof_catalog=None, read_galaxy_catalog=None,
+                 aperture_stellar_mass=None, centers_fn=None, hbt_masses=None,
+                 hbt_find=None):
+    """Measure and write the GSMF of every design run with the finder chosen in
+    args (PGalF readers or HBT-HERONS reader functions passed in)."""
     with open(args.design) as fh:
         run_ids = list(json.load(fh).keys())
 
@@ -302,6 +355,17 @@ def main():
     done, missing, unchecked = {a: [] for a in apertures}, [], []
     for rid in run_ids:
         root = args.root_template.format(id=rid)
+        if args.finder == "hbt":
+            # HBT-HERONS reads units, h and box from the SWIFT metadata, so the
+            # PGalF little-h check does not apply.
+            try:
+                hbt_find(root, args.snapshot)
+            except FileNotFoundError as e:
+                missing.append((rid, str(e)))
+                continue
+            masses, header = hbt_masses(root, args.snapshot, apertures, center=args.center)
+            write_run(args, rid, masses, header, apertures, out_dirs, done)
+            continue
         step = f"{args.snapshot:05d}"
         cat = Path(root) / "FoF_Data" / f"FoF.{step}" / f"GALCATALOG.LIST.{step}"
         if not cat.exists():
@@ -319,19 +383,13 @@ def main():
         masses, header = stellar_masses_code(
             root, args.snapshot, read_fof_catalog, read_galaxy_catalog,
             apertures, aperture_fn=aperture_stellar_mass, centers_fn=centers_fn)
-        for a, mstar_code, d in zip(apertures, masses, out_dirs):
-            centers, phi, scatter, counts, z = gsmf_from_masses(
-                mstar_code, header, mass_lo=args.mass_lo, mass_hi=args.mass_hi,
-                dlog=args.dlog, min_count=args.min_count)
-            write_emulator_yaml(d / f"run_{rid}.yml", centers, phi, scatter, counts,
-                                scaling_name=args.scaling_name)
-            done[a].append((rid, z, int(counts.sum()), len(centers)))
+        write_run(args, rid, masses, header, apertures, out_dirs, done)
 
     for a, d in zip(apertures, out_dirs):
         ap = (f"{a:g} pkpc 3D aperture, centre={args.center}" if _is_aperture(a)
               else "total bound M*")
         print(f"Wrote {len(done[a])} GSMF files to {d}/  "
-              f"(scaling='{args.scaling_name}', M*={ap})")
+              f"(finder={args.finder}, scaling='{args.scaling_name}', M*={ap})")
         for rid, z, ntot, nbin in done[a]:
             print(f"  run {rid:>3}: z={z:.3f}  {ntot:>7d} galaxies  {nbin} bins")
     if unchecked:
@@ -340,7 +398,7 @@ def main():
         for rid, msg in unchecked:
             print(f"  run {rid:>3}: {msg}")
     if missing:
-        print(f"\nMISSING catalogues for {len(missing)} runs (not yet processed by PGalF):")
+        print(f"\nMISSING catalogues for {len(missing)} runs (not yet processed by {args.finder}):")
         for rid, path in missing:
             print(f"  run {rid:>3}: {path}")
     if any(done.values()):

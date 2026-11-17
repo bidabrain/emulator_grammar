@@ -155,6 +155,27 @@ centre of mass of all particle types, or the GalCenter stellar centre from
 fall back to the COM). `galcenter` is closer to the observational convention
 and avoids apertures that miss an offset stellar body.
 
+**Alternative finder: HBT-HERONS** (`--finder hbt`). Instead of PGalF, the
+catalogues can come from HBT-HERONS run with
+[HBT-HERONS-GRAMMAR](https://github.com/bidabrain/HBT-HERONS-GRAMMAR)'s
+`grammar/run_hbt.sh` (needs SWIFT FoF group IDs in every snapshot and all
+snapshots from early times; see that README):
+
+```bash
+python measure_gsmf.py --finder hbt \
+    --hbt-repo      /path/to/HBT-HERONS-GRAMMAR \
+    --root-template "/path/to/hbt/run_{id}" \
+    --snapshot      <z=0 SWIFT snapshot> \
+    --design        design_gsmf/design_parameters.json \
+    --out-dir       gsmf_measured_hbt [--aperture-kpc 0 30 50 100]
+```
+
+Same YAML format and units. Galaxies are HBT self-bound subhaloes (≥20 bound
+particles); M* counts bound star particles; apertures are centred on the most
+bound particle (`--center mostbound`, default) or the bound centre of mass
+(`--center com`). The little-h check is not needed (HBT reads h and units from
+the SWIFT metadata). Keep the two finders' outputs in separate `--out-dir`s.
+
 **Stage 5 — train the emulator and calibrate** (to be written)
 
 Load `design_parameters.json` + `gsmf_measured/*.yml`, train a Gaussian process

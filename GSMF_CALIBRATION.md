@@ -129,6 +129,13 @@ python3 measure_gsmf.py \
   `galcenter` = GalCenter 输出的恒星中心(`GALFIND.CENTER`,需跑过 galcenter 阶段),
   缺失的 subhalo 回退到质心。`galcenter` 更接近观测做法,能避免质心偏离恒星主体时
   孔径漏掉恒星。
+- **改用 HBT-HERONS**(`--finder hbt --hbt-repo <HBT-HERONS-GRAMMAR>`):Stage 3 改跑
+  `HBT-HERONS-GRAMMAR/grammar/run_hbt.sh`(要求 SWIFT 每个 snapshot 都带 FoF 的
+  `FOFGroupIDs`,且需从早期 snapshot 一路跑到 z=0,详见该 repo 的 README),
+  `--root-template` 指向各 run 的 HBT 输出目录。YAML 格式和单位不变;galaxy = HBT 自束缚
+  subhalo(≥20 个束缚粒子),M* 只算束缚恒星,孔径中心默认为最束缚粒子
+  (`--center mostbound`,也可 `com`)。HBT 从 SWIFT 元数据读 h 和单位,不需要 little-h 自检。
+  两种 finder 的结果请写到不同的 `--out-dir`。
 - 产出 `gsmf_measured/run_X.yml`,结构:
 
 ```yaml
