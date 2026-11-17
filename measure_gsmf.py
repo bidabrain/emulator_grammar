@@ -17,7 +17,8 @@ swiftemulator.io.swift.load_pipeline_outputs expects:
         histogram:
           values:        [...]          # raw galaxy counts per bin (reference only)
 
-PGalF reports M* in Msun/h and phi in (Mpc/h)^-3 dex^-1. We convert to PHYSICAL
+PGalF reports M* in Msun/h and phi in (Mpc/h)^-3 dex^-1 (only if NewDD found h;
+see check_little_h). We convert to PHYSICAL
 units (Msun, Mpc^-3 dex^-1) using h from the catalogue header, so the GSMF lines
 line up directly with observational data (Baldry+2012 / Driver+2022, physical
 Msun) at the calibration step -- no further h-juggling.
@@ -56,6 +57,50 @@ import yaml
 def h_of(hubble):
     """Catalogue header stores H0 (e.g. 69.33) or h (0.6933); return h."""
     return hubble / 100.0 if (hubble and hubble > 1.0) else hubble
+
+
+_MPC_CM = 3.08567758e24
+
+
+def check_little_h(root, snapshot, header):
+    """Check that the PGalF catalogue really is in little-h units.
+
+    PGalF's NewDD used to miss /Cosmology/h on SWIFT input and silently use
+    h=1, leaving box, positions and masses in cMpc / Msun (see pgalf
+    NewDD/NOTE_SWIFT_h_units.md). The FoF header's `hubble` is overwritten with
+    a compile-time H0, so it cannot reveal this; compare the FoF box_size with
+    the SWIFT snapshot that run_pgalf.sh links as <root>/snap_XXXX.hdf5.
+    Returns ("ok" | "pre-fix" | "mismatch" | "unchecked", message)."""
+    snap = Path(root) / f"snap_{snapshot:04d}.hdf5"
+    if not snap.exists():
+        return "unchecked", f"{snap} not found"
+    try:
+        import h5py
+    except ImportError:
+        return "unchecked", "h5py not available"
+    with h5py.File(snap, "r") as f:
+        box = float(np.atleast_1d(f["Header"].attrs["BoxSize"])[0])
+        if "HubbleParam" in f["Header"].attrs:
+            h = float(np.atleast_1d(f["Header"].attrs["HubbleParam"])[0])
+        elif "Cosmology" in f and "h" in f["Cosmology"].attrs:
+            h = float(np.atleast_1d(f["Cosmology"].attrs["h"])[0])
+        else:
+            return "unchecked", f"no h in {snap}"
+        unit_l = _MPC_CM
+        if "InternalCodeUnits" in f:
+            unit_l = float(np.atleast_1d(
+                f["InternalCodeUnits"].attrs["Unit length in cgs (U_L)"])[0])
+    box_mpc = box * unit_l / _MPC_CM
+    got = float(header["box_size"])
+    if abs(got / (box_mpc * h) - 1) < 1e-3:
+        return "ok", f"box_size={got:.4g} cMpc/h = {box_mpc:g} Mpc x h={h:g}"
+    if abs(got / box_mpc - 1) < 1e-3:
+        return "pre-fix", (f"box_size={got:.4g} equals the snapshot BoxSize in Mpc "
+                           f"({box_mpc:g}), not x h={h:g}: catalogue made by the old "
+                           "NewDD (h=1, units cMpc/Msun). Re-run PGalF from NewDD "
+                           "(pgalf_swift_grammar >= 2570de6).")
+    return "mismatch", (f"box_size={got:.4g} matches neither {box_mpc:g} Mpc nor "
+                        f"{box_mpc * h:.4g} cMpc/h from {snap}")
 
 
 def _is_aperture(a):
@@ -216,6 +261,10 @@ def main():
                    help="aperture centre: 'com' = subhalo centre of mass of all "
                         "particle types; 'galcenter' = GalCenter stellar centre "
                         "(GALFIND.CENTER), falling back to the COM where missing")
+    p.add_argument("--skip-h-check", action="store_true",
+                   help="do not compare the FoF box_size with <root>/snap_XXXX.hdf5 "
+                        "(the check catches catalogues made by the old NewDD, which "
+                        "used h=1 on SWIFT input)")
     args = p.parse_args()
 
     # Import PGalF's binary readers from its repo.
@@ -250,7 +299,7 @@ def main():
     for d in out_dirs:
         d.mkdir(parents=True, exist_ok=True)
 
-    done, missing = {a: [] for a in apertures}, []
+    done, missing, unchecked = {a: [] for a in apertures}, [], []
     for rid in run_ids:
         root = args.root_template.format(id=rid)
         step = f"{args.snapshot:05d}"
@@ -258,6 +307,14 @@ def main():
         if not cat.exists():
             missing.append((rid, str(cat)))
             continue
+
+        if not args.skip_h_check:
+            fof = Path(root) / "FoF_Data" / f"FoF.{step}" / f"FoF_halo_cat.{step}"
+            status, msg = check_little_h(root, args.snapshot, read_fof_catalog(fof)[0])
+            if status in ("pre-fix", "mismatch"):
+                raise SystemExit(f"run {rid}: {msg}\n(use --skip-h-check to override)")
+            if status == "unchecked":
+                unchecked.append((rid, msg))
 
         masses, header = stellar_masses_code(
             root, args.snapshot, read_fof_catalog, read_galaxy_catalog,
@@ -277,6 +334,11 @@ def main():
               f"(scaling='{args.scaling_name}', M*={ap})")
         for rid, z, ntot, nbin in done[a]:
             print(f"  run {rid:>3}: z={z:.3f}  {ntot:>7d} galaxies  {nbin} bins")
+    if unchecked:
+        print(f"\nlittle-h check SKIPPED for {len(unchecked)} runs "
+              "(cannot confirm the catalogue is in h units):")
+        for rid, msg in unchecked:
+            print(f"  run {rid:>3}: {msg}")
     if missing:
         print(f"\nMISSING catalogues for {len(missing)} runs (not yet processed by PGalF):")
         for rid, path in missing:

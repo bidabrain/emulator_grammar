@@ -87,6 +87,14 @@ z=0 的 snapshot 号对所有 run 相同(由 `output_list.txt` 决定)。
 > pgalf 的宇宙学是**编译期硬编码**(`#define REQUIRED_OMEGA_M/…/_H0`),换宇宙学要改
 > C 源码重编译。本标定里 48 个 run 宇宙学相同,无需改动。
 
+> **必须用 pgalf_swift_grammar ≥ `2570de6`(并重新编译 NewDD)。** SWIFT snapshot 的
+> 长度/质量不带 h,h 只存在 `/Cosmology/h`;旧版 NewDD 读不到它,默认 h=1,导致
+> catalogue 实际是 cMpc / Msun(FoF `box_size` = BoxSize,而不是 BoxSize×h)。
+> 由此测出的 GSMF:φ 偏低约 0.48 dex、M* 偏高约 0.16 dex、孔径只有标称的约 0.69 倍。
+> 用旧 NewDD 跑过的 run 需从 NewDD 起重跑(输出到新目录,不要在旧目录上用 `-r`),
+> 再重新测 GSMF。详见 `pgalf_swift_grammar/NewDD/NOTE_SWIFT_h_units.md`。
+> 注意 FoF 头里的 `hubble`(69.33)是编译期写死的,不能用来判断。
+
 ---
 
 ## Stage 4 — 测量 GSMF (`measure_gsmf.py`)
@@ -113,6 +121,10 @@ python3 measure_gsmf.py \
 - `--pgalf-repo` 需 ≥ `3d0b545`(自动识别 `GALFIND.DATA` 记录长度;旧版写死长度,
   NCHEM/NDUST 编译下会报 `Truncated subhalo header`),多孔径需 ≥ `ba53e2d`;
   版本不够时脚本会直接报错提示 `git pull`。
+- **单位自检**:每个 run 测量前,脚本把 FoF 的 `box_size` 和 `run_pgalf.sh` 链接的
+  `<root>/snap_XXXX.hdf5` 里的 `BoxSize × h` 比对;若是旧 NewDD 产物(box_size = BoxSize)
+  或两者都对不上,直接报错停止,不写 YAML。找不到该链接(或没有 `h5py`)的 run 会列为
+  "little-h check SKIPPED";`--skip-h-check` 可关闭此检查。
 - `--center com|galcenter`(默认 `com`):孔径中心。`com` = subhalo 所有粒子的质心;
   `galcenter` = GalCenter 输出的恒星中心(`GALFIND.CENTER`,需跑过 galcenter 阶段),
   缺失的 subhalo 回退到质心。`galcenter` 更接近观测做法,能避免质心偏离恒星主体时

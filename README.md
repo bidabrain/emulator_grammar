@@ -109,6 +109,14 @@ For each run's z=0 snapshot run pgalf to get a galaxy catalogue
 (`FoF_Data/FoF.<NNNNN>/GALCATALOG.LIST.<NNNNN>`). The catalogue is in little-h
 units (Msun/h, Mpc/h).
 
+> **Use pgalf_swift_grammar ≥ `2570de6` (rebuild NewDD).** SWIFT snapshots
+> store lengths/masses without h and keep h in `/Cosmology/h`; older NewDD
+> missed it and silently used h=1, so those catalogues are really in cMpc /
+> Msun (FoF `box_size` = BoxSize instead of BoxSize×h). GSMFs measured from
+> them have φ too low by ≈0.48 dex, M* too high by ≈0.16 dex and apertures
+> ≈0.69× too small. Re-run PGalF from NewDD into a fresh output directory and
+> re-measure. Details: `pgalf_swift_grammar/NewDD/NOTE_SWIFT_h_units.md`.
+
 **Stage 4 — measure the GSMF** (`measure_gsmf.py`)
 
 ```bash
@@ -133,6 +141,13 @@ The `GALFIND.DATA` reader comes from `--pgalf-repo`, which must be at least
 `3d0b545` (auto-detects record sizes; older readers hard-code them and fail with
 `Truncated subhalo header` on `NCHEM`/`NDUST` builds) and `ba53e2d` for several
 apertures; the script checks this and asks you to `git pull` otherwise.
+
+Before measuring each run the script checks the units: it compares the FoF
+`box_size` with `BoxSize × h` of the SWIFT snapshot that `run_pgalf.sh` links
+as `<root>/snap_XXXX.hdf5`, and stops if the catalogue was made by the old
+NewDD (box_size = BoxSize) or matches neither. Runs without that link (or
+without `h5py`) are listed as "little-h check SKIPPED"; `--skip-h-check`
+disables the check.
 
 `--center com|galcenter` (default `com`) picks the aperture centre: the subhalo
 centre of mass of all particle types, or the GalCenter stellar centre from
