@@ -129,6 +129,11 @@ python3 measure_gsmf.py \
   `galcenter` = GalCenter 输出的恒星中心(`GALFIND.CENTER`,需跑过 galcenter 阶段),
   缺失的 subhalo 回退到质心。`galcenter` 更接近观测做法,能避免质心偏离恒星主体时
   孔径漏掉恒星。
+- **Zoom-in 模拟**:只有高分辨区域里有 galaxy,φ 必须按高分辨区域的体积归一化。
+  用 `--volume-frac F`(φ 用 `F × 盒子体积`,如 1/4 × 1/4 × 1 的高分辨长条为 1/16;
+  若扣掉边缘污染层则更小),否则 φ 会低 1/F 倍。`--max-lowres-frac F` 去掉低分辨 DM
+  质量占比超过 F 的 galaxy(两种 finder 都支持;`0` = 只保留完全未污染的)。两者默认
+  关闭,即均匀周期盒。
 - **改用 HBT-HERONS**(`--finder hbt --hbt-repo <HBT-HERONS-GRAMMAR>`):Stage 3 改跑
   `HBT-HERONS-GRAMMAR/grammar/run_hbt.sh`(要求 SWIFT 每个 snapshot 都带 FoF 的
   `FOFGroupIDs`,且需从早期 snapshot 一路跑到 z=0,详见该 repo 的 README),

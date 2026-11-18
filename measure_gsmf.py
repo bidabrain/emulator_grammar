@@ -188,13 +188,14 @@ def gsmf_physical(root, snapshot, read_fof, read_gal,
 
 
 def gsmf_from_masses(mstar_code, header, mass_lo=7.0, mass_hi=12.0, dlog=0.25,
-                     min_count=1):
+                     min_count=1, volume_frac=1.0):
     """Bin catalogue M* [Msun/h] into a PHYSICAL-unit GSMF; same return as
-    gsmf_physical."""
+    gsmf_physical. volume_frac is the fraction of the box the galaxies sample
+    (zoom runs: the high-res region; 1 for a uniform box)."""
     h = h_of(header["hubble"])
     z = header["redshift"]
     mstar = mstar_code[mstar_code > 0] / h             # Msun/h -> Msun
-    volume = (header["box_size"] / h) ** 3             # (Mpc/h)^3 -> Mpc^3
+    volume = (header["box_size"] / h) ** 3 * volume_frac   # (Mpc/h)^3 -> Mpc^3
 
     edges = np.arange(mass_lo, mass_hi + 1e-9, dlog)
     counts, _ = np.histogram(np.log10(mstar), bins=edges)
@@ -242,7 +243,7 @@ def write_run(args, rid, masses, header, apertures, out_dirs, done):
     for a, mstar_code, d in zip(apertures, masses, out_dirs):
         centers, phi, scatter, counts, z = gsmf_from_masses(
             mstar_code, header, mass_lo=args.mass_lo, mass_hi=args.mass_hi,
-            dlog=args.dlog, min_count=args.min_count)
+            dlog=args.dlog, min_count=args.min_count, volume_frac=args.volume_frac)
         write_emulator_yaml(d / f"run_{rid}.yml", centers, phi, scatter, counts,
                             scaling_name=args.scaling_name)
         done[a].append((rid, z, int(counts.sum()), len(centers)))
@@ -286,11 +287,20 @@ def main():
                         "centre (GALFIND.CENTER), COM where missing. HBT: 'mostbound' "
                         "(default) = most bound particle, 'com' = centre of mass of the "
                         "bound particles")
+    p.add_argument("--volume-frac", type=float, default=1.0,
+                   help="fraction of the box volume used to normalise phi; for a "
+                        "zoom run the high-res region (e.g. 1/16 for a 1/4 x 1/4 x 1 "
+                        "column, minus the contaminated edge). Default 1")
+    p.add_argument("--max-lowres-frac", type=float, default=None,
+                   help="zoom runs: drop galaxies whose low-res DM mass fraction "
+                        "exceeds this (e.g. 0 or 0.01); off by default")
     p.add_argument("--skip-h-check", action="store_true",
                    help="do not compare the FoF box_size with <root>/snap_XXXX.hdf5 "
                         "(the check catches catalogues made by the old NewDD, which "
                         "used h=1 on SWIFT input)")
     args = p.parse_args()
+    if not 0 < args.volume_frac <= 1:
+        p.error("--volume-frac must be in (0, 1]")
 
     if args.center is None:
         args.center = "com" if args.finder == "pgalf" else "mostbound"
@@ -332,14 +342,22 @@ def main():
         except ImportError:
             raise SystemExit(f"read_pgalf_catalog in {args.pgalf_repo} has no "
                              "galcenter_positions; git pull it for --center galcenter")
+    lowres_fn = None
+    if args.max_lowres_frac is not None:
+        try:
+            from read_pgalf_catalog import lowres_mass_fraction as lowres_fn
+        except ImportError:
+            raise SystemExit(f"read_pgalf_catalog in {args.pgalf_repo} has no "
+                             "lowres_mass_fraction; git pull it for --max-lowres-frac")
     measure_runs(args, read_fof_catalog=read_fof_catalog,
                  read_galaxy_catalog=read_galaxy_catalog,
-                 aperture_stellar_mass=aperture_stellar_mass, centers_fn=centers_fn)
+                 aperture_stellar_mass=aperture_stellar_mass, centers_fn=centers_fn,
+                 lowres_fn=lowres_fn)
 
 
 def measure_runs(args, read_fof_catalog=None, read_galaxy_catalog=None,
                  aperture_stellar_mass=None, centers_fn=None, hbt_masses=None,
-                 hbt_find=None):
+                 hbt_find=None, lowres_fn=None):
     """Measure and write the GSMF of every design run with the finder chosen in
     args (PGalF readers or HBT-HERONS reader functions passed in)."""
     with open(args.design) as fh:
@@ -363,7 +381,15 @@ def measure_runs(args, read_fof_catalog=None, read_galaxy_catalog=None,
             except FileNotFoundError as e:
                 missing.append((rid, str(e)))
                 continue
-            masses, header = hbt_masses(root, args.snapshot, apertures, center=args.center)
+            kw = {}
+            if args.max_lowres_frac is not None:
+                kw["max_lowres_frac"] = args.max_lowres_frac
+            try:
+                masses, header = hbt_masses(root, args.snapshot, apertures,
+                                            center=args.center, **kw)
+            except TypeError:
+                raise SystemExit("grammar/read_hbt_catalog in --hbt-repo is too old for "
+                                 "--max-lowres-frac; git pull it")
             write_run(args, rid, masses, header, apertures, out_dirs, done)
             continue
         step = f"{args.snapshot:05d}"
@@ -383,6 +409,10 @@ def measure_runs(args, read_fof_catalog=None, read_galaxy_catalog=None,
         masses, header = stellar_masses_code(
             root, args.snapshot, read_fof_catalog, read_galaxy_catalog,
             apertures, aperture_fn=aperture_stellar_mass, centers_fn=centers_fn)
+        if lowres_fn is not None:
+            keep = lowres_fn(Path(root) / "FoF_Data" / f"FoF.{step}" /
+                             f"GALFIND.DATA.{step}") <= args.max_lowres_frac
+            masses = [np.where(keep, m, 0.0) for m in masses]
         write_run(args, rid, masses, header, apertures, out_dirs, done)
 
     for a, d in zip(apertures, out_dirs):

@@ -155,6 +155,14 @@ centre of mass of all particle types, or the GalCenter stellar centre from
 fall back to the COM). `galcenter` is closer to the observational convention
 and avoids apertures that miss an offset stellar body.
 
+**Zoom-in runs.** In a zoom only the high-res region holds galaxies, so the
+GSMF must be normalised by that volume, not the whole box: pass
+`--volume-frac F` (φ uses `F × box volume`; e.g. 1/16 for a 1/4 × 1/4 × 1
+high-res column, smaller if a contaminated edge is excluded), otherwise φ is
+too low by 1/F. `--max-lowres-frac F` drops galaxies whose low-res DM mass
+fraction exceeds F (both finders; `0` keeps only uncontaminated ones). Both
+default to off, i.e. a uniform periodic box.
+
 **Alternative finder: HBT-HERONS** (`--finder hbt`). Instead of PGalF, the
 catalogues can come from HBT-HERONS run with
 [HBT-HERONS-GRAMMAR](https://github.com/bidabrain/HBT-HERONS-GRAMMAR)'s
