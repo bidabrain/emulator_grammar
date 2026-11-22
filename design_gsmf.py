@@ -37,7 +37,7 @@ from swiftemulator import ModelSpecification
 _default_base = Path("./templet.yml")
 base_parameter_file = Path(sys.argv[1]) if len(sys.argv) > 1 else _default_base
 
-number_of_simulations = 48          # ~8 x number_of_parameters (6)
+number_of_simulations = 6          # ~8 x number_of_parameters (6)
 output_path = Path("design_gsmf")
 output_path.mkdir(exist_ok=True)
 
